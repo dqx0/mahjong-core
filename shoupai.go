@@ -283,7 +283,11 @@ func (s *Shoupai) Decrease(suit string, n int) error {
 	return nil
 }
 
-func (s *Shoupai) Zimo(p string, check bool) error {
+func (s *Shoupai) Zimo(p string) error {
+	return s.ZimoWithCheck(p, true)
+}
+
+func (s *Shoupai) ZimoWithCheck(p string, check bool) error {
 	if check && s.zimo != "" {
 		return errors.New("Error: " + p)
 	}
@@ -312,8 +316,364 @@ func (s *Shoupai) Zimo(p string, check bool) error {
 	return nil
 }
 
+func (s *Shoupai) Dapai(p string) error {
+	return s.DapaiWithCheck(p, true)
+}
+
+func (s *Shoupai) DapaiWithCheck(p string, check bool) error {
+	if check && s.zimo == "" {
+		return errors.New("Error: " + p)
+	}
+	if !validPai(p) {
+		return errors.New("Invalid pai: " + p)
+	}
+	suit := string(p[0])
+	n, _ := strconv.Atoi(string(p[1]))
+	if err := s.Decrease(suit, n); err != nil {
+		return err
+	}
+	s.zimo = ""
+	if strings.HasSuffix(p, "*") {
+		s.lizhi = true
+	}
+	return nil
+}
+
+func (s *Shoupai) Fulou(m string, check bool) error {
+	if check && s.zimo != "" {
+		return errors.New("Error: " + m)
+	}
+	if m != validMianzi(m) {
+		return errors.New("Invalid mianzi: " + m)
+	}
+	if matched, _ := regexp.MatchString(`\d{4}$`, m); matched {
+		return errors.New("Error: " + m)
+	}
+	if matched, _ := regexp.MatchString(`\d{3}[\+\=\-]\d$`, m); matched {
+		return errors.New("Error: " + m)
+	}
+	suit := string(m[0])
+	numbers := regexp.MustCompile(`\d(?![\+\=\-])`).FindAllString(m, -1)
+	for _, nStr := range numbers {
+		n, _ := strconv.Atoi(nStr)
+		if err := s.Decrease(suit, n); err != nil {
+			return err
+		}
+	}
+	s.fulou = append(s.fulou, m)
+	if matched, _ := regexp.MatchString(`\d{4}`, m); !matched {
+		s.zimo = m
+	}
+	return nil
+}
+
+func (s *Shoupai) Gang(m string, check bool) error {
+	if check && s.zimo == "" {
+		return errors.New("Error: " + m)
+	}
+	if check && len(s.zimo) > 2 {
+		return errors.New("Error: " + m)
+	}
+	if m != validMianzi(m) {
+		return errors.New("Invalid mianzi: " + m)
+	}
+	suit := string(m[0])
+	if matched, _ := regexp.MatchString(`\d{4}$`, m); matched {
+		numbers := regexp.MustCompile(`\d`).FindAllString(m, -1)
+		for _, nStr := range numbers {
+			n, _ := strconv.Atoi(nStr)
+			if err := s.Decrease(suit, n); err != nil {
+				return err
+			}
+		}
+		s.fulou = append(s.fulou, m)
+	} else if matched, _ := regexp.MatchString(`\d{3}[\+\=\-]\d$`, m); matched {
+		m1 := m[:5]
+		i := -1
+		for index, m2 := range s.fulou {
+			if m1 == m2 {
+				i = index
+				break
+			}
+		}
+		if i < 0 {
+			return errors.New("Error: " + m)
+		}
+		s.fulou[i] = m
+		n, _ := strconv.Atoi(string(m[len(m)-1]))
+		if err := s.Decrease(suit, n); err != nil {
+			return err
+		}
+	} else {
+		return errors.New("Error: " + m)
+	}
+	s.zimo = ""
+	return nil
+}
+
+func (s *Shoupai) Menqian() bool {
+	re := regexp.MustCompile(`[\+\=\-]`)
+	for _, m := range s.fulou {
+		if re.MatchString(m) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Shoupai) Lizhi() bool {
+	return s.lizhi
+}
+
+func (s *Shoupai) GetDapai(check bool) []string {
+	if s.zimo == "" {
+		return nil
+	}
+
+	deny := make(map[string]bool)
+	if check && len(s.zimo) > 2 {
+		m := s.zimo
+		suit := string(m[0])
+		n := 5
+		if match := regexp.MustCompile(`\d`).FindString(m[1:2]); match != "" {
+			n, _ = strconv.Atoi(match)
+		}
+		deny[suit+strconv.Itoa(n)] = true
+		if !regexp.MustCompile(`^[mpsz](\d)\d\d`).MatchString(strings.Replace(m, "0", "5", 1)) {
+			if n < 7 && regexp.MustCompile(`^[mps]\d-\d\d$`).MatchString(m) {
+				deny[suit+strconv.Itoa(n+3)] = true
+			}
+			if n > 3 && regexp.MustCompile(`^[mps]\d\d\d-$`).MatchString(m) {
+				deny[suit+strconv.Itoa(n-3)] = true
+			}
+		}
+	}
+
+	var dapai []string
+	if !s.lizhi {
+		for _, suit := range []string{"m", "p", "s", "z"} {
+			bingpai := s.bingpai[suit]
+			for n := 1; n < len(bingpai); n++ {
+				if bingpai[n] == 0 {
+					continue
+				}
+				if deny[suit+strconv.Itoa(n)] {
+					continue
+				}
+				if suit+strconv.Itoa(n) == s.zimo && bingpai[n] == 1 {
+					continue
+				}
+				if suit == "z" || n != 5 {
+					dapai = append(dapai, suit+strconv.Itoa(n))
+				} else {
+					if bingpai[0] > 0 && (suit+"0" != s.zimo || bingpai[0] > 1) {
+						dapai = append(dapai, suit+"0")
+					}
+					if bingpai[0] < bingpai[5] {
+						dapai = append(dapai, suit+strconv.Itoa(n))
+					}
+				}
+			}
+		}
+	}
+	if len(s.zimo) == 2 {
+		dapai = append(dapai, s.zimo+"_")
+	}
+	return dapai
+}
+
+func (s *Shoupai) GetChiMianzi(p string, check bool) ([]string, error) {
+	if s.zimo != "" {
+		return nil, nil
+	}
+	if !validPai(p) {
+		return nil, errors.New("Invalid pai: " + p)
+	}
+
+	var mianzi []string
+	suit := string(p[0])
+	n := 5
+	if p[1] != '0' {
+		n, _ = strconv.Atoi(string(p[1]))
+	}
+	d := regexp.MustCompile(`[\+\=\-]$`).FindString(p)
+	if d == "" {
+		return nil, errors.New("Invalid pai: " + p)
+	}
+	if suit == "z" || d != "-" {
+		return mianzi, nil
+	}
+	if s.lizhi {
+		return mianzi, nil
+	}
+
+	bingpai := s.bingpai[suit]
+	if n >= 3 && bingpai[n-2] > 0 && bingpai[n-1] > 0 {
+		if !check || (n > 3 && bingpai[n-3]+bingpai[n] < 14-(len(s.fulou)+1)*3) {
+			if n-2 == 5 && bingpai[0] > 0 {
+				mianzi = append(mianzi, suit+"067-")
+			}
+			if n-1 == 5 && bingpai[0] > 0 {
+				mianzi = append(mianzi, suit+"406-")
+			}
+			if (n-2 != 5 && n-1 != 5) || bingpai[0] < bingpai[5] {
+				mianzi = append(mianzi, suit+strconv.Itoa(n-2)+strconv.Itoa(n-1)+string(p[1])+d)
+			}
+		}
+	}
+	if n >= 2 && n <= 8 && bingpai[n-1] > 0 && bingpai[n+1] > 0 {
+		if !check || bingpai[n] < 14-(len(s.fulou)+1)*3 {
+			if n-1 == 5 && bingpai[0] > 0 {
+				mianzi = append(mianzi, suit+"06-7")
+			}
+			if n+1 == 5 && bingpai[0] > 0 {
+				mianzi = append(mianzi, suit+"34-0")
+			}
+			if (n-1 != 5 && n+1 != 5) || bingpai[0] < bingpai[5] {
+				mianzi = append(mianzi, suit+strconv.Itoa(n-1)+string(p[1])+d+strconv.Itoa(n+1))
+			}
+		}
+	}
+	if n <= 7 && bingpai[n+1] > 0 && bingpai[n+2] > 0 {
+		var bingpaiNPlus3 int
+		if n < 7 {
+			bingpaiNPlus3 = bingpai[n+3]
+		} else {
+			bingpaiNPlus3 = 0
+		}
+		if !check || bingpai[n]+bingpaiNPlus3 < 14-(len(s.fulou)+1)*3 {
+			if n+1 == 5 && bingpai[0] > 0 {
+				mianzi = append(mianzi, suit+"4-06")
+			}
+			if n+2 == 5 && bingpai[0] > 0 {
+				mianzi = append(mianzi, suit+"3-40")
+			}
+			if (n+1 != 5 && n+2 != 5) || bingpai[0] < bingpai[5] {
+				mianzi = append(mianzi, suit+string(p[1])+d+strconv.Itoa(n+1)+strconv.Itoa(n+2))
+			}
+		}
+	}
+	return mianzi, nil
+}
+
+func (s *Shoupai) GetPengMianzi(p string) ([]string, error) {
+	if s.zimo != "" {
+		return nil, nil
+	}
+	if !validPai(p) {
+		return nil, errors.New("Invalid pai: " + p)
+	}
+
+	var mianzi []string
+	suit := string(p[0])
+	n := 5
+	if p[1] != '0' {
+		n, _ = strconv.Atoi(string(p[1]))
+	}
+	d := regexp.MustCompile(`[\+\=\-]$`).FindString(p)
+	if d == "" {
+		return nil, errors.New("Invalid pai: " + p)
+	}
+	if s.lizhi {
+		return mianzi, nil
+	}
+
+	bingpai := s.bingpai[suit]
+	if bingpai[n] >= 2 {
+		if n == 5 && bingpai[0] >= 2 {
+			mianzi = append(mianzi, suit+"00"+string(p[1])+d)
+		}
+		if n == 5 && bingpai[0] >= 1 && bingpai[5]-bingpai[0] >= 1 {
+			mianzi = append(mianzi, suit+"50"+string(p[1])+d)
+		}
+		if n != 5 || bingpai[5]-bingpai[0] >= 2 {
+			mianzi = append(mianzi, suit+strconv.Itoa(n)+strconv.Itoa(n)+string(p[1])+d)
+		}
+	}
+	return mianzi, nil
+}
+
+func (s *Shoupai) GetGangMianzi(p string) ([]string, error) {
+	var mianzi []string
+	if p != "" {
+		if s.zimo != "" {
+			return nil, nil
+		}
+		if !validPai(p) {
+			return nil, errors.New("Invalid pai: " + p)
+		}
+
+		suit := string(p[0])
+		n := 5
+		if p[1] != '0' {
+			n, _ = strconv.Atoi(string(p[1]))
+		}
+		d := regexp.MustCompile(`[\+\=\-]$`).FindString(p)
+		if d == "" {
+			return nil, errors.New("Invalid pai: " + p)
+		}
+		if s.lizhi {
+			return mianzi, nil
+		}
+
+		bingpai := s.bingpai[suit]
+		if bingpai[n] == 3 {
+			if n == 5 {
+				mianzi = []string{suit + strings.Repeat("5", 3-bingpai[0]) + strings.Repeat("0", bingpai[0]) + string(p[1]) + d}
+			} else {
+				mianzi = []string{suit + strconv.Itoa(n) + strconv.Itoa(n) + strconv.Itoa(n) + strconv.Itoa(n) + d}
+			}
+		}
+	} else {
+		if s.zimo == "" {
+			return nil, nil
+		}
+		if len(s.zimo) > 2 {
+			return nil, nil
+		}
+		p = strings.Replace(s.zimo, "0", "5", 1)
+
+		for _, suit := range []string{"m", "p", "s", "z"} {
+			bingpai := s.bingpai[suit]
+			for n := 1; n < len(bingpai); n++ {
+				if bingpai[n] == 0 {
+					continue
+				}
+				if bingpai[n] == 4 {
+					if s.lizhi && suit+strconv.Itoa(n) != p {
+						continue
+					}
+					if n == 5 {
+						mianzi = append(mianzi, suit+strings.Repeat("5", 4-bingpai[0])+strings.Repeat("0", bingpai[0]))
+					} else {
+						mianzi = append(mianzi, suit+strconv.Itoa(n)+strconv.Itoa(n)+strconv.Itoa(n)+strconv.Itoa(n))
+					}
+				} else {
+					if s.lizhi {
+						continue
+					}
+					for _, m := range s.fulou {
+						if strings.Replace(m, "0", "5", -1)[:4] == suit+strconv.Itoa(n)+strconv.Itoa(n)+strconv.Itoa(n) {
+							if n == 5 && bingpai[0] > 0 {
+								mianzi = append(mianzi, m+"0")
+							} else {
+								mianzi = append(mianzi, m+strconv.Itoa(n))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return mianzi, nil
+}
+
 func main() {
-	shoupai := NewShoupai().FromString("m123p456s789z4567")
-	shoupai.zimo = "z7"
+	shoupai := FromString("m123p456s789z34567")
+	err := shoupai.Dapai("m1")
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	println(shoupai.Clone().ToString())
 }
